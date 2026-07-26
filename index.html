@@ -1060,8 +1060,13 @@
     <div id="usersControls" style="display:none;">
       <div class="controls">
         <span class="hint" style="margin-right:auto;">All active accounts on this device</span>
+        <button class="data-btn data-btn-export" id="downloadUpdatedFileBtn" type="button" title="Download a fresh copy of this file with the current account list built in">⬇ Download Updated File</button>
         <button class="data-btn data-btn-import" id="addUserBtn" type="button">+ Add User</button>
       </div>
+      <div class="hint" id="accountsShareNote" style="margin:6px 0 4px;">
+        Accounts only exist on <b>this</b> device/browser until you share an updated file. Adding, editing, or deleting a user automatically downloads a fresh copy with the current account list built in — replace the file/link everyone uses with that download. Use the button below to re-download it any time.
+      </div>
+      <div class="hint" id="downloadUpdatedFileStatus"></div>
     </div>
   </div>
   <div class="stat-row">
@@ -1401,6 +1406,67 @@ function deleteUser(username){
   USERS = USERS.filter(u => u.username !== username);
   saveUsers();
   renderUsersTable();
+  downloadUpdatedFile();
+}
+
+// =====================================================================
+// DOWNLOAD UPDATED FILE — accounts added/edited/deleted only live in
+// this browser's local storage. Other people opening the same link or
+// file won't see them until that file is replaced with one that has
+// the current account list baked in as the defaults. This builds that
+// file: it re-fetches this page's own raw source where possible (so
+// nothing about the live session leaks in), swaps in the current
+// USERS list, and offers it as a download.
+// =====================================================================
+async function downloadUpdatedFile(){
+  const statusEl = document.getElementById('downloadUpdatedFileStatus');
+  statusEl.className = 'hint';
+  statusEl.textContent = 'Preparing updated file…';
+  try{
+    let sourceText = null;
+    try{
+      const res = await fetch(location.href, {cache:'no-store'});
+      if(res.ok) sourceText = await res.text();
+    }catch(fetchErr){ /* fall through to the DOM-clone fallback below */ }
+
+    if(!sourceText){
+      // Fallback for contexts where re-fetching the file isn't possible
+      // (e.g. opened straight from disk): clone the live page and reset
+      // anything transient before serializing, so the download boots
+      // fresh at the login screen instead of wherever we currently are.
+      const clone = document.documentElement.cloneNode(true);
+      const loginOv = clone.querySelector('#loginOverlay');
+      if(loginOv) loginOv.classList.remove('hidden');
+      const addOv = clone.querySelector('#addUserOverlay');
+      if(addOv) addOv.classList.add('hidden');
+      const editOv = clone.querySelector('#editAccountOverlay');
+      if(editOv) editOv.classList.add('hidden');
+      clone.querySelectorAll('input').forEach(i=>{ i.value=''; });
+      sourceText = '<!DOCTYPE html>\n' + clone.outerHTML;
+    }
+
+    const usersBlock = 'const DEFAULT_USERS = ' + JSON.stringify(USERS, null, 2) + ';';
+    const updated = sourceText.replace(/const DEFAULT_USERS = \[[\s\S]*?\];/, usersBlock);
+
+    if(updated === sourceText){
+      statusEl.className = 'login-error';
+      statusEl.textContent = "Couldn't find the account list in this file automatically — please contact support.";
+      return;
+    }
+
+    const blob = new Blob([updated], {type:'text/html;charset=utf-8;'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'easypc_stock_ledger.html';
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    statusEl.className = 'hint';
+    statusEl.textContent = 'Downloaded. Replace the file/link everyone uses with this one so the new/updated accounts work for them too.';
+  }catch(err){
+    statusEl.className = 'login-error';
+    statusEl.textContent = 'Could not prepare the file: ' + err.message;
+  }
 }
 
 function populateSelect(selectEl, options){
@@ -1413,6 +1479,7 @@ function populateSelect(selectEl, options){
 
 function initUsersAndRole(){
   document.getElementById('addUserBtn').addEventListener('click', openAddUserModal);
+  document.getElementById('downloadUpdatedFileBtn').addEventListener('click', downloadUpdatedFile);
   document.getElementById('cancelAddUserBtn').addEventListener('click', closeAddUserModal);
   document.getElementById('usersTableBody').addEventListener('click', (e)=>{
     const delBtn = e.target.closest('.delete-user-btn');
@@ -1448,6 +1515,7 @@ function initUsersAndRole(){
     saveUsers();
     renderUsersTable();
     closeAddUserModal();
+    downloadUpdatedFile();
   });
 
   // ---- edit any user's account (triggered from the Users and Role table) ----
@@ -1481,6 +1549,7 @@ function initUsersAndRole(){
     }
     renderUsersTable();
     closeEditAccountModal();
+    downloadUpdatedFile();
   });
 }
 
