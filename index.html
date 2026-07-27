@@ -692,7 +692,7 @@
       <input id="loginUser" type="text" autocomplete="username" autofocus>
       <label for="loginPass">Password</label>
       <input id="loginPass" type="password" autocomplete="current-password">
-      <button type="submit">Log in</button>
+      <button type="submit" id="loginSubmitBtn">Log in</button>
       <div class="login-error" id="loginError"></div>
     </form>
   </div>
@@ -1059,14 +1059,10 @@
     </div>
     <div id="usersControls" style="display:none;">
       <div class="controls">
-        <span class="hint" style="margin-right:auto;">All active accounts on this device</span>
-        <button class="data-btn data-btn-export" id="downloadUpdatedFileBtn" type="button" title="Download a fresh copy of this file with the current account list built in">⬇ Download Updated File</button>
+        <span class="hint" style="margin-right:auto;">Accounts are shared — everyone using this link sees the same list</span>
         <button class="data-btn data-btn-import" id="addUserBtn" type="button">+ Add User</button>
       </div>
-      <div class="hint" id="accountsShareNote" style="margin:6px 0 4px;">
-        Accounts only exist on <b>this</b> device/browser until you share an updated file. Adding, editing, or deleting a user automatically downloads a fresh copy with the current account list built in — replace the file/link everyone uses with that download. Use the button below to re-download it any time.
-      </div>
-      <div class="hint" id="downloadUpdatedFileStatus"></div>
+      <div class="hint" id="usersSyncStatus" style="margin:6px 0 4px;"></div>
     </div>
   </div>
   <div class="stat-row">
@@ -1263,20 +1259,46 @@ const DEFAULT_USERS = [
 ];
 
 let CURRENT_USER = null; // username string
-let USERS = [];          // array of user records, loaded from localStorage
+let USERS = [];          // array of user records, shared via /api/users
 
-function loadUsers(){
+// Accounts are shared across everyone using this link via a small
+// Cloudflare Pages Function + KV store (see /functions/api/users.js).
+// localStorage is kept as an offline cache/fallback only — e.g. if the
+// API isn't reachable (Function not deployed yet, KV not bound, or the
+// file was opened locally instead of through the hosted link).
+async function fetchUsers(){
+  try{
+    const res = await fetch('/api/users', {cache:'no-store'});
+    if(res.ok){
+      const parsed = await res.json();
+      if(Array.isArray(parsed) && parsed.length){
+        try{ localStorage.setItem(USERS_KEY, JSON.stringify(parsed)); }catch(e){}
+        return {users: parsed, shared: true};
+      }
+    }
+  }catch(e){ /* API unreachable — fall back below */ }
+
   try{
     const raw = localStorage.getItem(USERS_KEY);
     if(raw){
       const parsed = JSON.parse(raw);
-      if(Array.isArray(parsed) && parsed.length) return parsed;
+      if(Array.isArray(parsed) && parsed.length) return {users: parsed, shared: false};
     }
   }catch(e){}
-  return DEFAULT_USERS.slice();
+  return {users: DEFAULT_USERS.slice(), shared: false};
 }
-function saveUsers(){
+async function saveUsers(){
   try{ localStorage.setItem(USERS_KEY, JSON.stringify(USERS)); }catch(e){}
+  try{
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(USERS),
+    });
+    return res.ok;
+  }catch(e){
+    return false;
+  }
 }
 function findUser(username){
   return USERS.find(u => u.username.toLowerCase() === String(username).trim().toLowerCase());
@@ -1334,21 +1356,34 @@ function doLogout(){
   window.location.reload();
 }
 
-function initLogin(){
-  USERS = loadUsers();
-  saveUsers(); // persist defaults on first run so they're editable from Users & Role
+async function initLogin(){
+  const submitBtn = document.getElementById('loginSubmitBtn');
+  const errEl = document.getElementById('loginError');
+  submitBtn.disabled = true;
+  errEl.textContent = 'Loading accounts…';
+
+  const result = await fetchUsers();
+  USERS = result.users;
+  submitBtn.disabled = false;
+  if(result.shared){
+    errEl.textContent = '';
+  } else {
+    errEl.className = 'login-error';
+    errEl.textContent = "Couldn't reach the shared account list — using accounts saved on this device only.";
+  }
 
   document.getElementById('loginForm').addEventListener('submit', (e)=>{
     e.preventDefault();
     const u = document.getElementById('loginUser').value.trim();
     const p = document.getElementById('loginPass').value;
-    const errEl = document.getElementById('loginError');
     const acct = findUser(u);
     if(!acct || acct.password !== p){
+      errEl.className = 'login-error';
       errEl.textContent = 'Incorrect username or password.';
       return;
     }
     if(acct.active === false){
+      errEl.className = 'login-error';
       errEl.textContent = 'This account has been deactivated.';
       return;
     }
@@ -1406,67 +1441,6 @@ function deleteUser(username){
   USERS = USERS.filter(u => u.username !== username);
   saveUsers();
   renderUsersTable();
-  downloadUpdatedFile();
-}
-
-// =====================================================================
-// DOWNLOAD UPDATED FILE — accounts added/edited/deleted only live in
-// this browser's local storage. Other people opening the same link or
-// file won't see them until that file is replaced with one that has
-// the current account list baked in as the defaults. This builds that
-// file: it re-fetches this page's own raw source where possible (so
-// nothing about the live session leaks in), swaps in the current
-// USERS list, and offers it as a download.
-// =====================================================================
-async function downloadUpdatedFile(){
-  const statusEl = document.getElementById('downloadUpdatedFileStatus');
-  statusEl.className = 'hint';
-  statusEl.textContent = 'Preparing updated file…';
-  try{
-    let sourceText = null;
-    try{
-      const res = await fetch(location.href, {cache:'no-store'});
-      if(res.ok) sourceText = await res.text();
-    }catch(fetchErr){ /* fall through to the DOM-clone fallback below */ }
-
-    if(!sourceText){
-      // Fallback for contexts where re-fetching the file isn't possible
-      // (e.g. opened straight from disk): clone the live page and reset
-      // anything transient before serializing, so the download boots
-      // fresh at the login screen instead of wherever we currently are.
-      const clone = document.documentElement.cloneNode(true);
-      const loginOv = clone.querySelector('#loginOverlay');
-      if(loginOv) loginOv.classList.remove('hidden');
-      const addOv = clone.querySelector('#addUserOverlay');
-      if(addOv) addOv.classList.add('hidden');
-      const editOv = clone.querySelector('#editAccountOverlay');
-      if(editOv) editOv.classList.add('hidden');
-      clone.querySelectorAll('input').forEach(i=>{ i.value=''; });
-      sourceText = '<!DOCTYPE html>\n' + clone.outerHTML;
-    }
-
-    const usersBlock = 'const DEFAULT_USERS = ' + JSON.stringify(USERS, null, 2) + ';';
-    const updated = sourceText.replace(/const DEFAULT_USERS = \[[\s\S]*?\];/, usersBlock);
-
-    if(updated === sourceText){
-      statusEl.className = 'login-error';
-      statusEl.textContent = "Couldn't find the account list in this file automatically — please contact support.";
-      return;
-    }
-
-    const blob = new Blob([updated], {type:'text/html;charset=utf-8;'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'easypc_stock_ledger.html';
-    a.click();
-    URL.revokeObjectURL(a.href);
-
-    statusEl.className = 'hint';
-    statusEl.textContent = 'Downloaded. Replace the file/link everyone uses with this one so the new/updated accounts work for them too.';
-  }catch(err){
-    statusEl.className = 'login-error';
-    statusEl.textContent = 'Could not prepare the file: ' + err.message;
-  }
 }
 
 function populateSelect(selectEl, options){
@@ -1479,7 +1453,6 @@ function populateSelect(selectEl, options){
 
 function initUsersAndRole(){
   document.getElementById('addUserBtn').addEventListener('click', openAddUserModal);
-  document.getElementById('downloadUpdatedFileBtn').addEventListener('click', downloadUpdatedFile);
   document.getElementById('cancelAddUserBtn').addEventListener('click', closeAddUserModal);
   document.getElementById('usersTableBody').addEventListener('click', (e)=>{
     const delBtn = e.target.closest('.delete-user-btn');
@@ -1515,7 +1488,6 @@ function initUsersAndRole(){
     saveUsers();
     renderUsersTable();
     closeAddUserModal();
-    downloadUpdatedFile();
   });
 
   // ---- edit any user's account (triggered from the Users and Role table) ----
@@ -1549,7 +1521,6 @@ function initUsersAndRole(){
     }
     renderUsersTable();
     closeEditAccountModal();
-    downloadUpdatedFile();
   });
 }
 
