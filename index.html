@@ -168,15 +168,16 @@
     top:14px; right:14px;
     width:28px; height:28px;
     border-radius:50%;
-    border:1px solid var(--line);
-    background:#fff;
+    border:1px solid transparent;
+    background:transparent;
     color:var(--ink-soft);
     font-size:16px;
     line-height:1;
     cursor:pointer;
     display:flex; align-items:center; justify-content:center;
+    z-index:2;
   }
-  .modal-close-btn:hover{background:var(--paper-alt); color:var(--ink); border-color:var(--navy-600);}
+  .modal-close-btn:hover{background:var(--paper-alt); color:var(--ink); border-color:var(--line);}
   .login-card .mark{
     font-family:var(--font-mono); font-size:11px; letter-spacing:.18em; color:var(--gold);
     border:1px solid var(--gold); display:inline-block; padding:3px 8px; border-radius:3px; margin-bottom:10px;
@@ -189,12 +190,12 @@
     width:100%; padding:10px 12px; border-radius:7px; border:1px solid var(--navy-600);
     font-family:var(--font-body); font-size:14px; background:#fff; color:var(--ink);
   }
-  .login-card button{
+  .login-card button[type="submit"]{
     margin-top:18px; width:100%; padding:11px; border-radius:999px; border:none;
     background:linear-gradient(135deg, var(--gold), #dba33f); color:#3a2a06;
     font-weight:700; font-size:14px; cursor:pointer; box-shadow:0 3px 10px rgba(201,138,44,.4);
   }
-  .login-card button:hover{filter:brightness(1.05);}
+  .login-card button[type="submit"]:hover{filter:brightness(1.05);}
   .login-error{color:var(--rose); font-size:12.5px; margin-top:12px; min-height:14px; font-family:var(--font-mono);}
   .login-hint{margin-top:16px; font-size:11px; color:var(--ink-soft); font-family:var(--font-mono); line-height:1.5;}
 
@@ -204,6 +205,9 @@
     display:flex; align-items:center; justify-content:center;
     background:rgba(11,21,38,.72);
     padding:20px;
+    transform:translateZ(0);
+    -webkit-transform:translateZ(0);
+    will-change:transform;
   }
   .modal-overlay.hidden{display:none;}
   .modal-overlay .login-card{max-height:90vh; overflow-y:auto;}
@@ -1192,8 +1196,8 @@
       <select id="newAccess"></select>
 
       <div style="display:flex; gap:10px; margin-top:18px;">
-        <button type="submit" style="margin-top:0;">Save user</button>
-        <button type="button" id="cancelAddUserBtn" style="margin-top:0; background:#fff; color:var(--ink); border:1px solid var(--navy-600); box-shadow:none;">Cancel</button>
+        <button type="submit" style="margin-top:0; flex:1;">Save user</button>
+        <button type="button" id="cancelAddUserBtn" style="margin-top:0; flex:1; background:#fff; color:var(--ink); border:1px solid var(--navy-600); box-shadow:none;">Cancel</button>
       </div>
       <div class="login-error" id="addUserError"></div>
     </form>
@@ -1229,8 +1233,8 @@
       <select id="editAccess"></select>
 
       <div style="display:flex; gap:10px; margin-top:18px;">
-        <button type="submit" style="margin-top:0;">Save</button>
-        <button type="button" id="cancelEditAccountBtn" style="margin-top:0; background:#fff; color:var(--ink); border:1px solid var(--navy-600); box-shadow:none;">Cancel</button>
+        <button type="submit" style="margin-top:0; flex:1;">Save</button>
+        <button type="button" id="cancelEditAccountBtn" style="margin-top:0; flex:1; background:#fff; color:var(--ink); border:1px solid var(--navy-600); box-shadow:none;">Cancel</button>
       </div>
       <div class="login-error" id="editAccountError"></div>
     </form>
@@ -1582,9 +1586,13 @@ function openAddUserModal(){
   document.getElementById('newAccess').selectedIndex = 0;
   document.getElementById('newStore').selectedIndex = 0;
   document.getElementById('addUserOverlay').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('dataToolbar').style.visibility = 'hidden';
 }
 function closeAddUserModal(){
   document.getElementById('addUserOverlay').classList.add('hidden');
+  document.body.style.overflow = '';
+  document.getElementById('dataToolbar').style.visibility = '';
 }
 
 let EDITING_USERNAME = null;
@@ -1601,9 +1609,13 @@ function openEditAccountModal(username){
   document.getElementById('editArea').value = user.area || '';
   document.getElementById('editAccess').value = user.access || '';
   document.getElementById('editAccountOverlay').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('dataToolbar').style.visibility = 'hidden';
 }
 function closeEditAccountModal(){
   document.getElementById('editAccountOverlay').classList.add('hidden');
+  document.body.style.overflow = '';
+  document.getElementById('dataToolbar').style.visibility = '';
 }
 
 const STORE_SHORT = STORES.map(s => s.replace(' Store','').replace('Pasig Main Warehouse','Pasig WH'));
